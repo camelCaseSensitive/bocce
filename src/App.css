@@ -1,5 +1,7 @@
 .App {
   text-align: center;
+  font-family: 'Trebuchet MS', sans-serif;
+  
 }
 
 .App-logo {
@@ -36,3 +38,104 @@
     transform: rotate(360deg);
   }
 }
+
+.nav-bar {
+  display: flex;
+  width: 100%;
+  /* height: 2em; */
+  margin: 0;
+  padding: 0;
+  /* border: 2px solid red; */
+  background: #f6ffc8;
+  font-family: 'Koulen', cursive;
+  /* font-size: 2em; */
+}
+
+.nav-bar-links {
+  display: flex;
+  width: 100%;
+  height: 50%;
+  margin: 0;
+  /* border: 2px solid green; */
+  list-style: none
+}
+
+.nav-bar-link {
+  padding: 1em;
+  height: 50%;
+  /* border: 2px solid blue; */
+}
+
+.header {
+  display: flex;
+  width: 25%;
+  margin: 0;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.profile {
+  border-radius: 50%;
+  padding: 10px
+}
+
+.login {
+ height: 50%;
+ padding: 10px;
+ margin: 10px 0px 10px 0px;
+}
+
+.logout {
+  height: 50%;
+  padding: 10px;
+  margin: 10px 10px 10px 5px;
+}
+
+#songNameLabel {
+  display: inline
+}
+
+#cantUpload {
+  color: red;
+}
+
+.Home {
+  padding: 0px 20px;
+}
+
+.UserProfile {
+  padding: 0px 20px;
+}
+
+.UploadOriginal {
+  padding: 0px 20px;
+}
+
+.Original {
+  padding: 0px 20px;
+}
+
+.About {
+  padding: 0px 20px;
+}
+
+.Users {
+  padding: 0px 20px;
+}
+
+body {
+  background: #ffffff;
+}
+
+/* #myFile {
+  width: 200px;
+  background: green;
+} */
+
+#cvrpl {
+  -webkit-user-select: none; /* Safari */        
+  -moz-user-select: none; /* Firefox */
+  -ms-user-select: none; /* IE10+/Edge */
+  user-select: none; /* Standard */
+}
+
