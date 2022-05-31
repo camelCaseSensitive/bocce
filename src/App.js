@@ -13,7 +13,7 @@ import { render } from 'react-dom';
 
 // FIREBASE
 import { initializeApp } from "firebase/app";
-import { getAuth, signInWithRedirect, GoogleAuthProvider, getRedirectResult, onAuthStateChanged} from "firebase/auth";
+import { getAuth, signInWithRedirect, GoogleAuthProvider, getRedirectResult, onAuthStateChanged, signInAnonymously} from "firebase/auth";
 import { getFirestore, collection, doc, getDocs, getDoc, setDoc, updateDoc} from "firebase/firestore"
 import { getStorage, ref, uploadBytesResumable, getDownloadURL, listAll} from "firebase/storage";
 import { getDatabase, ref as dbRef, set as dbSet, get as dbGet, update, onValue} from 'firebase/database'
@@ -54,8 +54,20 @@ function App() {
   // const [hasUsername, setHasUsername] = React.useState("tbd");
   // const [usernameAvailable, setUsernameAvailable] = React.useState("")
   // const [availabilityMessage, setAvailabilityMessage] = React.useState(true)
+  const auth = getAuth();
+    signInAnonymously(auth)
+      .then(() => {
+        console.log("You're signed in anonymously")
+      })
+      .catch((error) => {
+        const errorCode = error.code;
+        const errorMessage = error.message;
+        // ...
+  });
 
   // auth.onAuthStateChanged(function (user) {
+  //   console.log("logged in")
+  //   console.log(user)
   //   if(user){
   //     loggedIn = true;
   //     // console.log(user.uid)
@@ -183,14 +195,14 @@ function App() {
           <nav className="nav-bar">
             <div className='header'>
               {/* <Link to={"/user/" + userName}><img className="profile" src={userProPic}/></Link> */}
-              <h1 id="cvrpl">CVRPL</h1>
+              <h1 id="cvrpl">Bocce</h1>
             </div>
             <ul className="nav-bar-links">
               <li className="nav-bar-link">
                 <Link to="/">Home</Link>
               </li>
               <li className="nav-bar-link">
-                <Link to="/about">About</Link>
+                <Link to="/about">Play!</Link>
               </li>
               <li className="nav-bar-link">
                 <Link to="/users">Users</Link>
@@ -204,7 +216,7 @@ function App() {
           </nav>
 
           <Routes>
-            <Route path="/about" element={<About/>}></Route>
+            <Route path="/about" element={<Room/>}></Route>
             <Route path="/users" element={<Users/>}> </Route>
             <Route path="/uploadsong" element={<UploadSong/>}></Route>
             <Route path="/uploadcover" element={<UploadCover/>}></Route>
@@ -238,18 +250,533 @@ class Home extends React.Component {
 
 function Room() {
   const { roomid } = useParams();
-  console.log(roomid)
+  let players = [];
+  let you = "Player1";
+
+  let round = -1;
+
+  let balls = [];
+  let systemVelocity = 0;
+  let distances = [];
+
+  // Database values
+  let ball = 0;
+  let oppX = 0;
+  let oppY = 0;
+  let vel  = [0, 0];
+  let vThrow = [0, 0];
+
+  let rolling = false;
+
+  let damping = 0.96;  // Rolling damping
+  let eball = 0.8;
+  let eWall = 0.3;
+
+  let x = 0;
+  let y = 0;
+
+  let xPrev = 0;
+  let yPrev = 0;
+
+  let toShoot = false;  // when true means a line is drawn and on mouseUp ball will throw
+
+
+  // Scoring system is a little complicated 
+  // Need to keep track of the score during the round 
+  // and then assign the score.value to the redTotal or greenTotal when the round ends
+  let score = {
+    team: null,
+    value: 0
+  };
+  let redScore = 0;
+  let redTotalScore = 0;
+  let greenScore = 0;
+  let greenTotalScore = 0
+  
+  let playersTurn = "Player1";
+
+  auth.onAuthStateChanged(function (user) {
+    dbGet(dbRef(rtdb, "/" + roomid + "/Players")).then((res) => {
+      res.forEach((player) => {
+        players.push(player.ref._path.pieces_[2])
+      })
+      dbSet(dbRef(rtdb, "/" + roomid + "/Players/Player" + (players.length+1)), auth.currentUser.uid)
+      you = "Player" + + (players.length+1);
+
+      // If you're the first player in the room
+      if(players.length + 1 == 1){
+        dbSet(dbRef(rtdb, "/" + roomid + "/ball"), 0);
+        dbSet(dbRef(rtdb, "/" + roomid + "/ballX"), 100);
+        dbSet(dbRef(rtdb, "/" + roomid + "/ballY"), 200);
+        dbSet(dbRef(rtdb, "/" + roomid + "/velX"), 0);
+        dbSet(dbRef(rtdb, "/" + roomid + "/velY"), 0);
+      }
+    }).then(() => {
+      const dbBall = dbRef(rtdb, "/" + roomid + "/ball");
+      onValue(dbBall, (snapshot) => {
+        // console.log("Ball changed")
+        ball = snapshot._node.value_;
+        if(ball != 0) rolling = false;
+        if(ball == 0) {
+          round += 1;
+        } 
+        if((ball + round) % 2 == 0) playersTurn = "Player1"
+        if((ball + round) % 2 == 1) playersTurn = "Player2"
+        if(score.team == "red"){
+          redScore = redTotalScore + score.value;
+          greenScore = greenTotalScore;
+        }
+        if(score.team == "green"){
+          greenScore = greenTotalScore + score.value
+          redScore = redTotalScore;
+        }
+        if(ball == 0) {
+          redTotalScore = redScore;
+          balls = [];
+          greenTotalScore = greenScore;
+          rolling = false;
+          score = {
+            team: null,
+            value: 0
+          };
+        } 
+      })
+
+      // Update opponent position when it changes in the database
+      const oppBallX = dbRef(rtdb, "/" + roomid + "/ballX");
+      onValue(oppBallX, (snapshot) => { 
+        oppX = snapshot._node.value_;
+      });
+
+      const oppBallY = dbRef(rtdb, "/" + roomid + "/ballY");
+      onValue(oppBallY, (snapshot) => {
+        oppY = snapshot._node.value_;
+      });
+
+      const dbVelX = dbRef(rtdb, "/" + roomid + "/velX");
+      onValue(dbVelX, (snapshot) => {
+        vel[0] = snapshot._node.value_;
+        if(vel[0] != 0) rolling = true;
+      })
+
+      const dbVelY = dbRef(rtdb, "/" + roomid + "/velY");
+      onValue(dbVelY, (snapshot) => {
+        vel[1] = snapshot._node.value_;
+        if(playersTurn != you && vel[1] != 0) balls.push(new bocceBall(oppX, oppY, vel[0], vel[1]))
+        if(vel[1] != 0) rolling = true;
+      })
+
+      // If the user exits the page
+      window.onbeforeunload = function (e) {
+        var message = "If you leave the game will end!",
+        e = e || window.event;
+        // For IE and Firefox
+        if (e) {
+          e.returnValue = message;
+        }
+      
+        // For Safari
+        return message;
+      };
+
+    })
+  });
+
+  function bocceBall(x, y, vx, vy) {
+    this.x = x;
+    this.y = y;
+    this.vx = vx; 
+    this.vy = vy;
+  }
+  
   const setup = (p5, canvasParentRef) => {
-    p5.createCanvas(500, 400).parent(canvasParentRef)
+    p5.createCanvas(1400, 600).parent(canvasParentRef)
+    p5.frameRate(30)
+
+    p5.mousePressed = () => {
+      if(mouseInCourt(p5.mouseX, p5.mouseY, 100 - 15, 200 - 15, 600*2 + 30, 120*2 + 30)){
+        toShoot = true;
+      }
+    }
+
+    p5.mouseReleased = () => {
+      if(playersTurn == you && rolling == false && toShoot == true) {
+        let randvx = vThrow[0];
+        let randvy = vThrow[1];
+        balls.push(new bocceBall(x, y, vThrow[0], vThrow[1]))
+        dbSet(dbRef(rtdb, "/" + roomid + "/velX"), vThrow[0]).then(() => {
+          dbSet(dbRef(rtdb, "/" + roomid + "/velY"), vThrow[1])
+        })
+        
+        toShoot = false;
+      }
+    }
   }
   
   const draw = p5 => {
-    p5.background(255, 130, 20)
-    p5.ellipse(p5.mouseX, 100, 100)
-    p5.ellipse(300, 100, 100)
-  }
+    p5.background(70, 130, 70)
+
+    
+
+    // Draw the court
+    p5.fill(90, 100, 75)
+    p5.rect(100 - 15, 200 - 15, 600*2 + 30, 120*2 + 30)
+
+    // Draw the foul line
+    p5.stroke(255)
+    p5.line(140 + 15, 200 - 15, 140 + 15, 440 + 15)
+    p5.stroke(0)
+
+    // Draw the scoreboard
+    p5.textSize(40)
+    p5.fill(255, 100, 100)
+    p5.rect(575, 100, 125, 50)
+    p5.fill(255)
+    p5.text(redScore, 590, 140)
+    p5.fill(100, 255, 100)
+    p5.rect(575 + 150, 100, 125, 50)
+    p5.fill(255)
+    p5.text(greenScore, 575 + 175, 140)
+
+    p5.text(balls.length, 200, 200)
+
+    // The active ball
+    if(playersTurn == you){
+      if(rolling == false){
+        // console.log("your turn ball not rolling")
+        if(p5.mouseIsPressed && toShoot){
+          p5.line(x, y, p5.mouseX, p5.mouseY)
+          vThrow = [(p5.mouseX - x) / 10, (p5.mouseY - y)/10];
+          // toShoot = true;
+        } else {
+          if(p5.mouseX > 100 && p5.mouseX < 140){
+            x = p5.mouseX;
+          } else if(p5.mouseX < 100){
+            x = 100;
+          } else if(p5.mouseX > 140){
+            x = 140;
+          }
+
+          if(p5.mouseY > 200 && p5.mouseY < 440){
+            y = p5.mouseY;
+          } else if(p5.mouseY < 200){
+            y = 200;
+          } else if(p5.mouseY > 440){
+            y = 440;
+          }
+        }
+
+        
+        if(balls.length == 0) {
+          p5.fill(255)
+          p5.ellipse(x, y, 16)
+        } else if(balls.length % 2 == 0){
+          p5.fill(200, 30, 30)
+          p5.ellipse(x, y, 30)
+        } else {
+          p5.fill(30, 200, 30)
+          p5.ellipse(x, y, 30)
+        }
+
+        // Update your position in the database when it changes 
+        if (x != xPrev){
+          // console.log("db write")
+          dbSet(dbRef(rtdb, "/" + roomid + "/ballX"), x)
+        }
+        if (y != yPrev){
+          // console.log("db write")
+          dbSet(dbRef(rtdb, "/" + roomid + "/ballY"), y)
+        }
+        xPrev = x;
+        yPrev = y;
+      } 
+    // Not your turn
+    } else {
+      if(rolling == false || systemVelocity == 0){
+        if(balls.length == 0) {
+          p5.fill(255)
+          p5.ellipse(oppX, oppY, 16)
+        } else if(balls.length % 2 == 0){
+          p5.fill(200, 30, 30)
+          p5.ellipse(oppX, oppY, 30)
+        } else {
+          p5.fill(30, 200, 30)
+          p5.ellipse(oppX, oppY, 30)
+        }
+      }
+    }
+
+    p5.fill(255)
+    systemVelocity = 0;
+
+    // Handle the collisions of the system of balls on the court
+    for(let i = 0; i < balls.length; i++){
+
+      // If a ball is going slow enough make it's velocity zero
+      if(p5.sqrt(balls[i].vx**2 + balls[i].vy**2) < 0.01){
+        balls[i].vx = 0;
+        balls[i].vy = 0
+      }
+
+      if(i == 0){
+        p5.fill(255);
+        p5.circle(balls[i].x, balls[i].y, 14)
+      } else if(i%2 == 0){
+        p5.fill(200, 30, 30)
+        p5.circle(balls[i].x, balls[i].y, 30)
+      } else {
+        p5.fill(30, 200, 30)
+        p5.circle(balls[i].x, balls[i].y, 30)
+      }
+
+      balls[i].x += balls[i].vx;
+      balls[i].vx *= damping;
+      balls[i].y += balls[i].vy;
+      balls[i].vy *= damping;
+
+      if(i == 0){
+        if(balls[i].x < 100 - 7) {
+          balls[i].vx *= -eWall;
+          balls[i].x = 100 - 7;
+          balls[i].x += balls[i].vx;
+        }
+        if(balls[i].x > 1300 + 7) {
+          balls[i].vx *= -eWall;
+          balls[i].x = 1300 + 7;
+          balls[i].x += balls[i].vx;
+        }
+        if(balls[i].y < 200 - 7){
+          balls[i].vy *= -eWall;
+          balls[i].y = 200 - 7;
+          balls[i].y += balls[i].vy;
+        }
+        if(balls[i].y > 440 + 7){
+          balls[i].vy *= -eWall;
+          balls[i].y = 440 + 7;
+          balls[i].y += balls[i].vy;
+        }
+      } else {
+        if(balls[i].x < 100) {
+          balls[i].vx *= -eWall;
+          balls[i].x = 100;
+          balls[i].x += balls[i].vx;
+        }
+        if(balls[i].x > 1300) {
+          balls[i].vx *= -eWall;
+          balls[i].x = 1300;
+          balls[i].x += balls[i].vx;
+        }
+        if(balls[i].y < 200){
+          balls[i].vy *= -eWall;
+          balls[i].y = 200;
+          balls[i].y += balls[i].vy;
+        }
+        if(balls[i].y > 440){
+          balls[i].vy *= -eWall;
+          balls[i].y = 440;
+          balls[i].y += balls[i].vy;
+        }
+      }
+      
+      for(let j = i; j < balls.length; j++){
+        if(i == 0){
+          if(i != j && p5.dist(balls[j].x, balls[j].y, balls[i].x, balls[i].y) < 15 + 8){
+            let x1 = [balls[j].x, balls[j].y];
+            let x2 = [balls[i].x, balls[i].y];
+            let v1 = [balls[j].vx, balls[j].vy];
+            let v2 = [balls[i].vx, balls[i].vy];
+            
+            let num1 = dotProduct(vectorSub(v1,v2), vectorSub(x1,x2));        // Numerator 1
+            let num2 = vectorSub(x1,x2);                                      // Numerator 2
+            let den1 = vectorMag(vectorSub(x1,x2))**2;                        // Denominator 1
   
+            
+            let num3 = dotProduct(vectorSub(v2,v1), vectorSub(x2,x1));        // Numerator 3
+            let num4 = vectorSub(x2,x1);                                      // Numerator 4
+            let den2 = vectorMag(vectorSub(x2,x1))**2;                        // Denominator 2
+  
+            let newv1 = vectorSub(v1, vectorMult(num2,(num1/den1)));
+            let newv2 = vectorSub(v2, vectorMult(num4,(num3/den2)));
+
+            // Update the positions
+            balls[j].x -= balls[j].vx;
+            balls[j].y -= balls[j].vy;
+            balls[i].x -= balls[i].vx;
+            balls[i].y -= balls[i].vy;
+            
+            // Update the velocities
+            balls[j].vx = newv1[0] * 0.6;
+            balls[j].vy = newv1[1] * 0.6;
+            balls[i].vx = newv2[0] * 1.5;
+            balls[i].vy = newv2[1] * 1.5;
+            
+            // Update the positions
+            balls[j].x += balls[j].vx;
+            balls[j].y += balls[j].vy;
+            balls[i].x += balls[i].vx;
+            balls[i].y += balls[i].vy;
+          }
+        } else {
+          if(i != j && p5.dist(balls[j].x, balls[j].y, balls[i].x, balls[i].y) < 30){
+            let x1 = [balls[j].x, balls[j].y];
+            let x2 = [balls[i].x, balls[i].y];
+            let v1 = [balls[j].vx, balls[j].vy];
+            let v2 = [balls[i].vx, balls[i].vy];
+  
+            
+            let num1 = dotProduct(vectorSub(v1,v2), vectorSub(x1,x2));        // Numerator 1
+            let num2 = vectorSub(x1,x2);                                      // Numerator 2
+            let den1 = vectorMag(vectorSub(x1,x2))**2;                        // Denominator 1
+  
+            
+            let num3 = dotProduct(vectorSub(v2,v1), vectorSub(x2,x1));        // Numerator 3
+            let num4 = vectorSub(x2,x1);                                      // Numerator 4
+            let den2 = vectorMag(vectorSub(x2,x1))**2;                        // Denominator 2
+  
+            let newv1 = vectorSub(v1, vectorMult(num2,(num1/den1)));
+            let newv2 = vectorSub(v2, vectorMult(num4,(num3/den2)));
+
+            // Update the positions
+            balls[j].x -= balls[j].vx;
+            balls[j].y -= balls[j].vy;
+            balls[i].x -= balls[i].vx;
+            balls[i].y -= balls[i].vy;
+            
+            // Update the velocities
+            balls[j].vx = newv1[0] * eball;
+            balls[j].vy = newv1[1] * eball;
+            balls[i].vx = newv2[0] * eball;
+            balls[i].vy = newv2[1] * eball;
+            
+            // Update the positions
+            balls[j].x += balls[j].vx;
+            balls[j].y += balls[j].vy;
+            balls[i].x += balls[i].vx;
+            balls[i].y += balls[i].vy;
+          }
+        }
+      }
+      systemVelocity += p5.sqrt(balls[i].vx**2 + balls[i].vy**2)
+    }
+    if(playersTurn == you && rolling && systemVelocity < 0.01){
+      if(ball + 1 == 9){
+        dbSet(dbRef(rtdb, "/" + roomid + "/ball"), 0)
+      } else {
+        dbSet(dbRef(rtdb, "/" + roomid + "/ball"), ball+1)
+      }
+      rolling = false;
+    }
+    if(systemVelocity < 0.01) systemVelocity = 0;
+    // Calculate and sort ball distances to white ball
+    if(balls.length > 1) {
+      let stop = false;
+      let closestPlayer;
+      let roundScore = 0;
+      distances = [];
+      // console.log(balls.length)
+      for(let i = 1; i < balls.length; i++) {
+        distances.push(p5.dist(balls[0].x, balls[0].y, balls[i].x, balls[i].y))
+      }
+      // console.log(distances)
+      let failsafe = 0
+      roundScore = 0;
+      while(stop == false){
+        let closestBall = {
+          value: Math.min(...distances), 
+          index: distances.indexOf(Math.min(...distances))
+        }
+        distances[ closestBall.index ] = 10000;
+        
+        if(closestBall.index % 2 == 0){
+          if(closestPlayer == "red"){
+            stop = true;
+            break;
+          }
+          closestPlayer = "green"
+          roundScore += 1;
+          score = {
+            team: "green",
+            value: roundScore
+          }
+        } else {
+          if(closestPlayer == "green"){
+            stop = true;
+            break;
+          }
+          closestPlayer = "red"
+          roundScore += 1;
+          score = {
+            team: "red",
+            value: roundScore
+          }
+        }
+        failsafe += 1;
+        if(failsafe > 10) {
+          stop = true;
+          break;
+        }
+      }
+      if(score.value == 11)  score.value = 1;
+      // console.log(score)
+    }
+  }
   return <Sketch setup={setup} draw={draw} />
+}
+
+function mouseInCourt(x, y, courtX, courtY, courtW, courtH) {
+  if(x > courtX && x < courtX + courtW && y > courtY && y < courtY + courtH){
+    return true;
+  } else {
+    return false;
+  }
+}
+
+function dotProduct(a,b){
+  // Dot product of a*b (inner product/ scalar product)
+  let product = 0;
+  
+  if (a.length !== b.length){
+    return undefined;
+  }
+  else{
+    for(let i = 0; i < a.length; i++){
+      product += a[i]*b[i];
+    }
+    return product; // this is a scalar (just a number)
+  }
+}
+
+function vectorMag(v){
+  // Vector magnitude
+  let mag = 0;
+  for(let i of v){
+    mag += i**2
+  }
+  return Math.sqrt(mag); // this is also a scalar
+}
+
+function vectorSub(a,b){
+  // Subtracts vector b from vector a
+  let sub = []
+  
+  if (a.length !== b.length){
+    return undefined;
+  }
+  else{
+    for(let i = 0; i < a.length; i++){
+      sub[i] = a[i]-b[i];
+    }
+    return sub; // this is a vector
+  }
+}
+
+function vectorMult(v,s){
+  // Multiplies vector (v) by scalar (s)
+  let mult = [];
+  for(let i = 0; i < v.length; i++){
+    mult[i] = v[i]*s;
+  }
+  return mult; // This is also a vector
 }
 
 function About() {
