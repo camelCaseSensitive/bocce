@@ -305,6 +305,17 @@ function Room() {
   let gameOver = false;
   let gameOverMessage = "Game Over"
 
+  let rollingSound = new Audio("rolling.mp3")
+  rollingSound.loop = true;
+  rollingSound.volume = 0.1
+  let ambience = new Audio('ambience.mp3')
+  ambience.loop = true;
+  ambience.volume = 0.25;
+
+  let hit = new Audio("hit.mp3")
+  // let music = new Audio('Royal Road2.mp3')
+  // music.volume = 0.3
+
   auth.onAuthStateChanged(function (user) {
     dbGet(dbRef(rtdb, "/" + roomid + "/Players")).then((res) => {
       res.forEach((player) => {
@@ -452,6 +463,7 @@ function Room() {
     dbSet(dbRef(rtdb, "/" + roomid + "/state"), JSON.stringify(state))
 
     p5.mousePressed = () => {
+      ambience.play();
       if(playersTurn == you && mouseInCourt(p5.mouseX, p5.mouseY, 100 - 15, 200 - 15, 600*2 + 30, 120*2 + 30) && rolling == false && waitingForPlayer2 == false && gameOver == false){
         toShoot = true;
         let state = {
@@ -479,6 +491,7 @@ function Room() {
         } 
         balls.push(new bocceBall(x, y, vThrow[0], vThrow[1]))
         rolling = true;
+        rollingSound.play();
         toShoot = false;
 
         let state = {
@@ -507,6 +520,70 @@ function Room() {
       gameOverMessage = "RED WINS!"
     }
 
+    let colliding = false;
+    for(let i = 0; i < balls.length; i++){
+      // Step 1/4 frame ahead
+      balls[i].x += balls[i].vx;
+      balls[i].y += balls[i].vy;
+
+      if(i == 0){
+        if(balls[i].x < 100 - 7) {
+          colliding = true
+          // balls[i].x += balls[i].vx;
+        }
+        if(balls[i].x > 1300 + 7) {
+          colliding = true
+          // balls[i].x += balls[i].vx;
+        }
+        if(balls[i].y < 200 - 7){
+          colliding = true
+          // balls[i].y += balls[i].vy;
+        }
+        if(balls[i].y > 440 + 7){
+          colliding = true
+          // balls[i].y += balls[i].vy;
+        }
+      } else {
+        if(balls[i].x < 100) {
+          colliding = true
+          // balls[i].x += balls[i].vx;
+        }
+        if(balls[i].x > 1300) {
+          colliding = true
+          // balls[i].x += balls[i].vx;
+        }
+        if(balls[i].y < 200){
+          colliding = true
+          // balls[i].y += balls[i].vy;
+        }
+        if(balls[i].y > 440){
+          colliding = true
+          // balls[i].y += balls[i].vy;
+        }
+      }
+      
+      for(let j = i; j < balls.length; j++){
+        balls[j].x += balls[j].vx;
+        balls[j].y += balls[j].vy;
+        if(i == 0){
+          if(i != j && p5.dist(balls[j].x, balls[j].y, balls[i].x, balls[i].y) < 15 + 8){
+            colliding = true
+          }
+        } else {
+          if(i != j && p5.dist(balls[j].x, balls[j].y, balls[i].x, balls[i].y) < 30){
+            colliding = true;
+          }
+        }
+        balls[j].x -= balls[j].vx;
+        balls[j].y -= balls[j].vy;
+      }
+      balls[i].x -= balls[i].vx;
+      balls[i].y -= balls[i].vy;
+    }
+    // if(colliding){
+    //   let h = new Audio("hit.mp3");
+    //   h.play();
+    // }
 
     if((ball + round) % 2 == 0) playersTurn = "Player1"
     if((ball + round) % 2 == 1) playersTurn = "Player2"
@@ -540,8 +617,6 @@ function Room() {
     if(gameOver) {
       p5.text(gameOverMessage, 600, 325)
     }
-
-    // p5.text(round, 100, 100)
 
     if(playersTurn == you && yourTurnFade > 0 && toShoot == false){
       p5.text("Your Turn", 600, 500)
@@ -874,6 +949,13 @@ function Room() {
         }
       }
 
+      rollingSound.volume  = Math.min(0.25, systemVelocity/5);
+      if(colliding){
+        let h = new Audio("hit.mp3");
+        h.volume = Math.min(0.5, systemVelocity/5)
+        h.play();
+      }
+
       if(balls.length > 1) {
         let stop = false;
         let closestPlayer;
@@ -989,6 +1071,7 @@ function Room() {
           dbSet(dbRef(rtdb, "/" + roomid + "/state"), JSON.stringify(state))
         }
         rolling = false;
+        rollingSound.pause();
       }
       if(systemVelocity < 0.01) systemVelocity = 0;
       // Calculate and sort ball distances to white ball
