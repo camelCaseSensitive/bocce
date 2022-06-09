@@ -295,8 +295,15 @@ function Room() {
   let redTotalScore = 0;
   let greenScore = 0;
   let greenTotalScore = 0;
+
+  let winningScore = 5;
   
   let playersTurn = "Player1";
+
+  let waitingForPlayer2 = true;
+
+  let gameOver = false;
+  let gameOverMessage = "Game Over"
 
   auth.onAuthStateChanged(function (user) {
     dbGet(dbRef(rtdb, "/" + roomid + "/Players")).then((res) => {
@@ -374,6 +381,13 @@ function Room() {
         // // console.log(jsonState)
       })
 
+      onValue(dbRef(rtdb, "/" + roomid + "/Players"), (snapshot) => {
+        console.log(snapshot._node.children_.root_.key)
+        if(snapshot._node.children_.root_.key == "Player2") {
+          waitingForPlayer2 = false;
+        }
+      })
+
       // If the user exits the page
       // window.onbeforeunload = function (e) {
       //   var message = "If you leave the game will end!",
@@ -389,6 +403,8 @@ function Room() {
 
       window.onbeforeunload = function(){
         // const yourPlayer = dbRef(rtdb, "/" + roomid + "/Players/" + you)
+        gameOverMessage = "The other player left :("
+        gameOver = true;
         const yourRoom = dbRef(rtdb, "/" + roomid)
         dbSet(yourRoom, null);
         // dbSet(yourPlayer, null)
@@ -436,7 +452,7 @@ function Room() {
     dbSet(dbRef(rtdb, "/" + roomid + "/state"), JSON.stringify(state))
 
     p5.mousePressed = () => {
-      if(playersTurn == you && mouseInCourt(p5.mouseX, p5.mouseY, 100 - 15, 200 - 15, 600*2 + 30, 120*2 + 30) && rolling == false){
+      if(playersTurn == you && mouseInCourt(p5.mouseX, p5.mouseY, 100 - 15, 200 - 15, 600*2 + 30, 120*2 + 30) && rolling == false && waitingForPlayer2 == false && gameOver == false){
         toShoot = true;
         let state = {
           rolling: rolling,
@@ -455,7 +471,7 @@ function Room() {
     }
 
     p5.mouseReleased = () => {
-      if(playersTurn == you && rolling == false && toShoot == true) {
+      if(playersTurn == you && rolling == false && toShoot == true && waitingForPlayer2 == false && gameOver == false) {
         if(Math.sqrt(vThrow[0]**2 + vThrow[1]**2) > topSpeed){
           let theta = p5.atan2(vThrow[1], vThrow[0])
           vThrow[0] = topSpeed * Math.cos(theta);
@@ -483,6 +499,15 @@ function Room() {
   }
   
   const draw = p5 => {
+    if(greenTotalScore >= winningScore && greenTotalScore >= redTotalScore + 2){
+      gameOver = true;
+      gameOverMessage = "GREEN WINS!"
+    } else if(redTotalScore >= winningScore && redTotalScore >= greenTotalScore + 2){
+      gameOver = true;
+      gameOverMessage = "RED WINS!"
+    }
+
+
     if((ball + round) % 2 == 0) playersTurn = "Player1"
     if((ball + round) % 2 == 1) playersTurn = "Player2"
 
@@ -507,6 +532,14 @@ function Room() {
     p5.rect(575 + 150, 100, 125, 50)
     p5.fill(255)
     p5.text(greenScore, 575 + 175, 140)
+
+    if(you == "Player1" && waitingForPlayer2){
+      p5.text("Wating for Player2...", 100, 100)
+    }
+
+    if(gameOver) {
+      p5.text(gameOverMessage, 600, 325)
+    }
 
     // p5.text(round, 100, 100)
 
@@ -904,31 +937,40 @@ function Room() {
       }
 
       if(rolling && systemVelocity < 0.01){
-        if(ball + 1 == 9){
-          round += 1;
-          // dbSet(dbRef(rtdb, "/" + roomid + "/ball"), 0)
-          ball = 0;
-          redTotalScore = redScore;
-          balls = [];
-          greenTotalScore = greenScore;
-          rolling = false;
-          score = {
-            team: null,
-            value: 0
-          };
-          let state = {
-            rolling: false,
-            mouse: [p5.mouseX, p5.mouseY],
-            toShoot: toShoot,
-            balls: balls,
-            ball: ball, 
-            round: round, 
-            redTotalScore: redTotalScore,
-            greenTotalScore: greenTotalScore,
-            redScore: redScore,
-            greenScore: greenScore
-          }
-          dbSet(dbRef(rtdb, "/" + roomid + "/state"), JSON.stringify(state))
+          if(ball + 1 == 9){
+            redTotalScore = redScore;
+            greenTotalScore = greenScore;
+            if(greenTotalScore >= winningScore && greenTotalScore >= redTotalScore + 2){
+              gameOver = true;
+              gameOverMessage = "GREEN WINS!"
+            } else if(redTotalScore >= winningScore && redTotalScore >= greenTotalScore + 2){
+              gameOver = true;
+              gameOverMessage = "RED WINS!"
+            }
+            if(!gameOver){
+              round += 1;
+              // dbSet(dbRef(rtdb, "/" + roomid + "/ball"), 0)
+              ball = 0;
+              balls = [];
+              rolling = false;
+              score = {
+                team: null,
+                value: 0
+              };
+              let state = {
+                rolling: false,
+                mouse: [p5.mouseX, p5.mouseY],
+                toShoot: toShoot,
+                balls: balls,
+                ball: ball, 
+                round: round, 
+                redTotalScore: redTotalScore,
+                greenTotalScore: greenTotalScore,
+                redScore: redScore,
+                greenScore: greenScore
+              }
+              dbSet(dbRef(rtdb, "/" + roomid + "/state"), JSON.stringify(state))
+            }
         } else {
           // dbSet(dbRef(rtdb, "/" + roomid + "/ball"), ball+1)
           ball += 1;
